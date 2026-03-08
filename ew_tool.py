@@ -21,10 +21,17 @@ from tkinter import filedialog, scrolledtext, messagebox, ttk
 # ---------------------------------------------------------------------------
 
 # Common EW7 database locations (searched in order for auto-detection)
+# EW7 typically stores databases under:
+#   C:\Users\Public\Documents\Softouch\EasyWorship\{Profile}\v6.1\Databases\Data\
+# The "v6.1" subfolder is used by EW7 for backward compatibility with EW6.
+# Some installs may omit the v6.1 folder. We check both variants.
 EW7_SEARCH_PATHS = [
-    # Windows default
+    # Windows default (with v6.1 — most common for EW7)
+    r"C:\Users\Public\Documents\Softouch\EasyWorship\Default\v6.1\Databases\Data",
+    # Windows default (without v6.1 — older installs or EW 2009)
     r"C:\Users\Public\Documents\Softouch\EasyWorship\Default\Databases\Data",
-    # Alternate Windows paths
+    # ProgramData variants
+    r"C:\ProgramData\Softouch\EasyWorship\Default\v6.1\Databases\Data",
     r"C:\ProgramData\Softouch\EasyWorship\Default\Databases\Data",
     # Relative to current working directory (for portable/testing setups)
     os.path.abspath("."),
@@ -842,7 +849,8 @@ def auto_detect_ew_path():
 
     # Also check for EW profiles: each profile is a subfolder under
     # C:\Users\Public\Documents\Softouch\EasyWorship\
-    # with structure: {ProfileName}\Databases\Data\
+    # with structure: {ProfileName}\v6.1\Databases\Data\
+    # or older:       {ProfileName}\Databases\Data\
     ew_base_dirs = [
         r"C:\Users\Public\Documents\Softouch\EasyWorship",
         r"C:\ProgramData\Softouch\EasyWorship",
@@ -851,6 +859,11 @@ def auto_detect_ew_path():
         if os.path.isdir(base):
             try:
                 for entry in os.listdir(base):
+                    # Check with v6.1 subfolder first (EW7 standard)
+                    profile_db_v61 = os.path.join(base, entry, "v6.1", "Databases", "Data")
+                    if profile_db_v61 not in candidates:
+                        candidates.append(profile_db_v61)
+                    # Also check without v6.1 (older or custom installs)
                     profile_db = os.path.join(base, entry, "Databases", "Data")
                     if profile_db not in candidates:
                         candidates.append(profile_db)
