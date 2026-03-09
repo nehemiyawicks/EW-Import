@@ -503,6 +503,28 @@ class EWDatabase:
 
         return songs
 
+    def get_resource_offset(self):
+        """
+        Detect the resource offset between SongHistory.rowid and SongWords.song_id.
+        EasyWorship uses a global resource ID system where:
+            SongWords.song_id = SongHistory.rowid + resource_offset
+        The offset is typically 223 (resources 1-223 are used by themes, layouts, etc.).
+        """
+        cur_h = self.conn_history.cursor()
+        cur_w = self.conn_words.cursor()
+
+        # Find matching pairs to detect the offset
+        cur_h.execute("SELECT rowid FROM song ORDER BY rowid LIMIT 1")
+        first_history = cur_h.fetchone()
+        cur_w.execute("SELECT song_id FROM word ORDER BY song_id LIMIT 1")
+        first_words = cur_w.fetchone()
+
+        if first_history and first_words:
+            return first_words[0] - first_history[0]
+
+        # Default EW7 offset if no existing data
+        return 223
+
     def get_next_song_id(self):
         """Get the next available song_id for SongWords."""
         cur = self.conn_words.cursor()
@@ -526,11 +548,18 @@ class EWDatabase:
         )
         return cur.fetchone()
 
-    def import_song(self, hymn, next_song_id):
+    def import_song(self, hymn, resource_offset=None):
         """
         Import a single hymn into the database.
-        Returns the song_id used in SongWords.
+        Returns (song_id, song_uid) where song_id is the global resource ID
+        used in SongWords and SongKeys.
+
+        EasyWorship links SongHistory and SongWords via:
+            SongWords.song_id = SongHistory.rowid + resource_offset
         """
+        if resource_offset is None:
+            resource_offset = self.get_resource_offset()
+
         title = hymn.get('title', '') or 'Untitled'
         author = hymn.get('author', '')
         copyright_ = hymn.get('copyright', '')
@@ -548,7 +577,7 @@ class EWDatabase:
             f"1-{str(uuid.uuid4()).upper()}" for _ in range(slide_count)
         )
 
-        # Insert into SongHistory
+        # Insert into SongHistory first to get the rowid
         cur_h = self.conn_history.cursor()
         cur_h.execute(
             "INSERT INTO song (song_uid, title, author, copyright, "
@@ -556,6 +585,9 @@ class EWDatabase:
             (song_uid, title, author, copyright_, '', ref_num)
         )
         song_rowid = cur_h.lastrowid
+
+        # Derive global resource ID from rowid + offset
+        song_id = song_rowid + resource_offset
 
         # Record creation action
         now_ticks = int(
@@ -568,19 +600,18 @@ class EWDatabase:
         )
         self.conn_history.commit()
 
-        # Insert into SongWords
+        # Insert into SongWords with the correct global resource ID
         cur_w = self.conn_words.cursor()
-        # Generate slide layout/revision data
         slide_layout_revs = ','.join(['1'] * slide_count)
         slide_revs = ','.join(['1'] * slide_count)
         cur_w.execute(
             "INSERT INTO word (song_id, words, slide_uids, "
             "slide_layout_revisions, slide_revisions) VALUES (?, ?, ?, ?, ?)",
-            (next_song_id, rtf_text, slide_uids, slide_layout_revs, slide_revs)
+            (song_id, rtf_text, slide_uids, slide_layout_revs, slide_revs)
         )
         self.conn_words.commit()
 
-        return next_song_id, song_uid
+        return song_id, song_uid
 
     def rebuild_search_index(self, song_id, title, lyrics_text):
         """
@@ -786,7 +817,9 @@ def import_songs(db, input_path, skip_duplicates=True, log_callback=None):
     imported = 0
     skipped = 0
     errors = 0
-    next_song_id = db.get_next_song_id()
+    resource_offset = db.get_resource_offset()
+    log(f"Resource offset: {resource_offset} "
+        f"(SongWords.song_id = SongHistory.rowid + {resource_offset})")
 
     for txt_file in txt_files:
         try:
@@ -817,21 +850,17 @@ def import_songs(db, input_path, skip_duplicates=True, log_callback=None):
                     continue
 
             try:
-                song_id, song_uid = db.import_song(hymn, next_song_id)
+                song_id, song_uid = db.import_song(hymn, resource_offset)
 
                 # Rebuild search index
                 lyrics_text = hymn.get('lyrics', '')
                 db.rebuild_search_index(song_id, title, lyrics_text)
 
-                log(f"Imported: {title}")
+                log(f"Imported: {title} (id={song_id})")
                 imported += 1
             except Exception as e:
                 log(f"Error importing '{title}': {e}")
                 errors += 1
-            finally:
-                # Always increment to avoid song_id collisions from
-                # partially committed rows in a failed import
-                next_song_id += 1
 
     log(f"\nImport complete: {imported} imported, {skipped} skipped, {errors} errors")
     return imported, skipped, errors
@@ -1223,9 +1252,85 @@ class EWToolApp:
 # ---------------------------------------------------------------------------
 
 def main():
-    root = tk.Tk()
-    app = EWToolApp(root)
-    root.mainloop()
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="EasyWorship 7 Song Import/Export Tool",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+CLI examples:
+  # Import songs from a folder into EW7 databases
+  python ew_tool.py import --db /path/to/EW/Data --input /path/to/songs/
+
+  # Export songs from EW7 databases to text files
+  python ew_tool.py export --db /path/to/EW/Data --output /path/to/output/
+
+  # Backup databases before making changes
+  python ew_tool.py backup --db /path/to/EW/Data --output /path/to/backups/
+
+  # Launch the GUI (default, no arguments)
+  python ew_tool.py
+        """
+    )
+    subparsers = parser.add_subparsers(dest='command')
+
+    # Import subcommand
+    imp = subparsers.add_parser('import', help='Import songs from .txt files')
+    imp.add_argument('--db', required=True,
+                     help='Path to EW7 database folder (containing SongHistory.db)')
+    imp.add_argument('--input', '-i', required=True,
+                     help='Path to .txt file or folder of .txt files')
+    imp.add_argument('--allow-duplicates', action='store_true',
+                     help='Import even if a song with the same title exists')
+
+    # Export subcommand
+    exp = subparsers.add_parser('export', help='Export songs to .txt files')
+    exp.add_argument('--db', required=True,
+                     help='Path to EW7 database folder')
+    exp.add_argument('--output', '-o', required=True,
+                     help='Output directory for .txt files')
+
+    # Backup subcommand
+    bak = subparsers.add_parser('backup', help='Backup EW7 databases')
+    bak.add_argument('--db', required=True,
+                     help='Path to EW7 database folder')
+    bak.add_argument('--output', '-o', required=True,
+                     help='Backup destination directory')
+
+    args = parser.parse_args()
+
+    if args.command is None:
+        # No subcommand — launch GUI
+        root = tk.Tk()
+        app = EWToolApp(root)
+        root.mainloop()
+        return
+
+    if args.command == 'import':
+        db = EWDatabase(args.db)
+        try:
+            imported, skipped, errors = import_songs(
+                db, args.input,
+                skip_duplicates=not args.allow_duplicates,
+                log_callback=print
+            )
+            print(f"\nDone: {imported} imported, {skipped} skipped, {errors} errors")
+        finally:
+            db.close()
+
+    elif args.command == 'export':
+        db = EWDatabase(args.db)
+        try:
+            songs = db.get_all_songs()
+            os.makedirs(args.output, exist_ok=True)
+            count = export_songs(db, songs, args.output, log_callback=print)
+            print(f"\nDone: exported {count} songs to {args.output}")
+        finally:
+            db.close()
+
+    elif args.command == 'backup':
+        result = backup_databases(args.db, args.output)
+        print(f"Backup created: {result}")
 
 
 if __name__ == '__main__':
