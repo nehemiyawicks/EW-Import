@@ -1,0 +1,17 @@
+---
+title: 05
+title_sinhala: 
+author: 
+copyright: 
+ccli: 
+book_ref: 05
+source: pptx_book
+---
+
+නින්දා දුක් සහ මරණය වින්දා
+[SLIDE]
+දෙව් ලොව සැප මට අත් කර දුන්නා
+[SLIDE]
+මරණේ බලයෙන් නිදහස ලැබුණා
+[SLIDE]
+ජීවන ම්ඟ මට එළි කර දුන්නා
