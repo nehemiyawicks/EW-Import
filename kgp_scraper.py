@@ -109,7 +109,7 @@ def parse_index(html):
     # Look for hymn links — expected format: page.asp?LyricsID=NNN
     for link in soup.find_all('a', href=True):
         href = link['href']
-        match = re.search(r'LyricsID=(\d+)', href)
+        match = re.search(r'LyricsID=([^&]+)', href)
         if not match:
             continue
 
