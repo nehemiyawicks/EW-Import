@@ -47,11 +47,11 @@ SLIDE_MARKER = "[SLIDE]"
 HYMN_SEPARATOR = "==="
 META_FENCE = "---"
 
-# RTF template matching EW7's format
+# RTF template matching EW7's format (uses \r\n line endings for Windows)
 RTF_HEADER = (
-    r"{\rtf1\ansi\deff0\sdeasyworship2" "\n"
-    r"{\fonttbl{\f0 Tahoma;}}" "\n"
-    r"{\colortbl ;}" "\n"
+    r"{\rtf1\ansi\deff0\sdeasyworship2" "\r\n"
+    r"{\fonttbl{\f0 Tahoma;}}" "\r\n"
+    r"{\colortbl ;}" "\r\n"
 )
 RTF_FOOTER = "}"
 
@@ -68,7 +68,7 @@ RTF_PARA = (
     r"\plain\sdewtemplatestyle101\fs180"
     r"{\*\sdfsreal 90}{\*\sdfsdef 90}\sdfsauto"
 )
-# RTF slide marker paragraph
+# RTF slide marker paragraph (no trailing \r\n — appended by text_to_rtf)
 RTF_SLIDE_MARKER = (
     r"{\pard\sdslidemarker\qc\qdef\sdewparatemplatestyle101"
     r"\plain\sdewtemplatestyle101\fs180"
@@ -279,39 +279,64 @@ def text_to_rtf(text):
     """
     Convert plain text (with [SLIDE] markers) to EW7-compatible RTF.
     Returns (rtf_string, slide_count).
+    Uses \\r\\n line endings to match EW7's Windows format.
     """
     lines = text.split('\n')
     rtf_parts = [RTF_HEADER]
     slide_count = 0
     is_first_line = True
     first_line_of_slide = True
+    # Track whether second paragraph needs sdasfactor 0
+    is_second_para = False
+
+    # RTF paragraph for second line (with sdasfactor 0, matching EW7's format)
+    RTF_SECOND_PARA = (
+        r"{\pard\qc\qdef\sdewparatemplatestyle101"
+        r"{\*\sdasfactor 0}"
+        r"\plain\sdewtemplatestyle101\fs180"
+        r"{\*\sdfsreal 90}{\*\sdfsdef 90}\sdfsauto"
+    )
 
     for line in lines:
         stripped = line.strip()
 
         if stripped == SLIDE_MARKER:
             # Insert slide marker
-            rtf_parts.append(RTF_SLIDE_MARKER + "\n")
+            rtf_parts.append(RTF_SLIDE_MARKER + "\r\n")
             slide_count += 1
             first_line_of_slide = True
+            continue
+
+        # Skip empty lines in RTF output
+        if not stripped:
             continue
 
         # Encode the line content
         encoded = encode_unicode_rtf(stripped)
 
-        if is_first_line or first_line_of_slide:
-            # First line uses the sdasfactor template
-            para_start = RTF_FIRST_PARA if is_first_line else (
+        if is_first_line:
+            # Very first line of the song uses sdasfactor 1
+            rtf_parts.append(f"{RTF_FIRST_PARA}{encoded}\\par}}\r\n")
+            is_first_line = False
+            first_line_of_slide = False
+            is_second_para = True
+        elif first_line_of_slide:
+            # First line after a slide marker uses sdasfactor 1
+            para_start = (
                 r"{\pard\qc\qdef\sdewparatemplatestyle101"
                 r"{\*\sdasfactor 1}{\*\sdasbaseline 90}\sdastextstyle101"
                 r"\plain\sdewtemplatestyle101\fs180"
                 r"{\*\sdfsreal 90}{\*\sdfsdef 90}\sdfsauto"
             )
-            rtf_parts.append(f"{para_start}{encoded}\\par}}\n")
-            is_first_line = False
+            rtf_parts.append(f"{para_start}{encoded}\\par}}\r\n")
             first_line_of_slide = False
+            is_second_para = True
+        elif is_second_para:
+            # Second paragraph uses sdasfactor 0 (matching EW7's format)
+            rtf_parts.append(f"{RTF_SECOND_PARA}{encoded}\\par}}\r\n")
+            is_second_para = False
         else:
-            rtf_parts.append(f"{RTF_PARA}{encoded}\\par}}\n")
+            rtf_parts.append(f"{RTF_PARA}{encoded}\\par}}\r\n")
 
     rtf_parts.append(RTF_FOOTER)
     return ''.join(rtf_parts), slide_count + 1  # +1 for last slide
@@ -1268,6 +1293,9 @@ CLI examples:
   # Backup databases before making changes
   python ew_tool.py backup --db /path/to/EW/Data --output /path/to/backups/
 
+  # Verify database integrity (find orphaned entries)
+  python ew_tool.py verify --db /path/to/EW/Data
+
   # Launch the GUI (default, no arguments)
   python ew_tool.py
         """
@@ -1297,6 +1325,13 @@ CLI examples:
     bak.add_argument('--output', '-o', required=True,
                      help='Backup destination directory')
 
+    # Verify subcommand
+    ver = subparsers.add_parser('verify', help='Verify database integrity')
+    ver.add_argument('--db', required=True,
+                     help='Path to EW7 database folder')
+    ver.add_argument('--fix', action='store_true',
+                     help='Remove orphaned entries (songs without lyrics)')
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -1309,6 +1344,7 @@ CLI examples:
     if args.command == 'import':
         db = EWDatabase(args.db)
         try:
+            db.connect()
             imported, skipped, errors = import_songs(
                 db, args.input,
                 skip_duplicates=not args.allow_duplicates,
@@ -1321,16 +1357,68 @@ CLI examples:
     elif args.command == 'export':
         db = EWDatabase(args.db)
         try:
-            songs = db.get_all_songs()
-            os.makedirs(args.output, exist_ok=True)
-            count = export_songs(db, songs, args.output, log_callback=print)
-            print(f"\nDone: exported {count} songs to {args.output}")
+            db.connect()
+            exported, skipped = export_songs(
+                db, args.output, log_callback=print
+            )
+            print(f"\nDone: exported {exported} songs to {args.output}")
         finally:
             db.close()
 
     elif args.command == 'backup':
         result = backup_databases(args.db, args.output)
         print(f"Backup created: {result}")
+
+    elif args.command == 'verify':
+        db = EWDatabase(args.db)
+        try:
+            db.connect()
+            offset = db.get_resource_offset()
+            print(f"Resource offset: {offset}")
+
+            # Find orphaned songs (in SongHistory but no SongWords entry)
+            cur_h = db.conn_history.cursor()
+            cur_w = db.conn_words.cursor()
+
+            all_songs = cur_h.execute(
+                "SELECT rowid, title FROM song ORDER BY rowid"
+            ).fetchall()
+            word_ids = set(
+                r[0] for r in cur_w.execute("SELECT song_id FROM word").fetchall()
+            )
+
+            orphans = []
+            for rowid, title in all_songs:
+                expected_song_id = rowid + offset
+                if expected_song_id not in word_ids:
+                    orphans.append((rowid, title, expected_song_id))
+
+            print(f"\nTotal songs in SongHistory: {len(all_songs)}")
+            print(f"Total entries in SongWords: {len(word_ids)}")
+            print(f"Orphaned songs (no lyrics): {len(orphans)}")
+
+            if orphans:
+                print("\nOrphaned entries:")
+                for rowid, title, song_id in orphans:
+                    print(f"  rowid={rowid}, title=\"{title}\", "
+                          f"expected song_id={song_id}")
+
+                if args.fix:
+                    print("\nRemoving orphaned entries...")
+                    for rowid, title, song_id in orphans:
+                        cur_h.execute("DELETE FROM song WHERE rowid = ?", (rowid,))
+                        cur_h.execute("DELETE FROM action WHERE song_id = ?", (rowid,))
+                        print(f"  Removed: {title} (rowid={rowid})")
+                    db.conn_history.commit()
+                    remaining = cur_h.execute("SELECT COUNT(*) FROM song").fetchone()[0]
+                    print(f"\nDone. {len(orphans)} orphaned entries removed. "
+                          f"{remaining} songs remaining.")
+                else:
+                    print("\nRun with --fix to remove orphaned entries.")
+            else:
+                print("\nAll songs have matching lyrics entries. Database is clean.")
+        finally:
+            db.close()
 
 
 if __name__ == '__main__':
