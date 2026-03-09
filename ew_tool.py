@@ -616,19 +616,18 @@ class EWDatabase:
                 cur.execute("INSERT INTO word_list (word) VALUES (?)", (word,))
                 word_list_id = cur.lastrowid
 
-            # Determine field flags
-            flags = set()
+            # Combine field flags with bitwise OR into a single value
+            flag = 0
             if word in title_words:
-                flags.add(FIELD_FLAG_TITLE)
+                flag |= FIELD_FLAG_TITLE
             if word in lyrics_words:
-                flags.add(FIELD_FLAG_WORDS)
+                flag |= FIELD_FLAG_WORDS
 
-            for flag in flags:
-                cur.execute(
-                    "INSERT INTO word_key (link_id, word_list_id, field_flag) "
-                    "VALUES (?, ?, ?)",
-                    (song_id, word_list_id, flag)
-                )
+            cur.execute(
+                "INSERT OR REPLACE INTO word_key (link_id, word_list_id, field_flag) "
+                "VALUES (?, ?, ?)",
+                (song_id, word_list_id, flag)
+            )
 
         self.conn_keys.commit()
 
@@ -826,10 +825,13 @@ def import_songs(db, input_path, skip_duplicates=True, log_callback=None):
 
                 log(f"Imported: {title}")
                 imported += 1
-                next_song_id += 1
             except Exception as e:
                 log(f"Error importing '{title}': {e}")
                 errors += 1
+            finally:
+                # Always increment to avoid song_id collisions from
+                # partially committed rows in a failed import
+                next_song_id += 1
 
     log(f"\nImport complete: {imported} imported, {skipped} skipped, {errors} errors")
     return imported, skipped, errors
