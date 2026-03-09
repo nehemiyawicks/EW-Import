@@ -156,8 +156,8 @@ def process_lyrics(raw_lyrics):
     """
     Process raw lyrics_chords field:
     1. Strip chords and ChordPro directives
-    2. Detect verse/chorus structure → [SLIDE] markers
-    3. Clean up formatting
+    2. Preserve blank-line verse breaks as [SLIDE] markers
+    3. Keep original line structure within verses
     """
     if not raw_lyrics:
         return ""
@@ -165,53 +165,32 @@ def process_lyrics(raw_lyrics):
     # Normalize line endings
     text = raw_lyrics.replace('\r\n', '\n').replace('\r', '\n')
 
-    # Detect chorus/verse structure from ChordPro markers BEFORE stripping
-    has_sections = '{start_of_' in text.lower() or '{soc}' in text.lower()
-
-    # If there are ChordPro section markers, use them for slide breaks
-    if has_sections:
-        # Replace section boundaries with slide markers
-        # First mark section starts
-        text = re.sub(
-            r'\{(?:start_of_chorus|start_of_verse|start_of_bridge|soc|sov|sob)\}',
-            '\n__SLIDE__\n', text, flags=re.IGNORECASE
-        )
-        # Remove section ends
-        text = re.sub(
-            r'\{(?:end_of_chorus|end_of_verse|end_of_bridge|eoc|eov|eob)\}',
-            '', text, flags=re.IGNORECASE
-        )
+    # Remove ChordPro section markers (start/end of chorus/verse/bridge)
+    text = re.sub(
+        r'\{(?:start_of_chorus|start_of_verse|start_of_bridge|'
+        r'end_of_chorus|end_of_verse|end_of_bridge|'
+        r'soc|eoc|sov|eov|sob|eob)\}\s*\n?',
+        '', text, flags=re.IGNORECASE
+    )
 
     # Strip all remaining chords
     text = strip_chords(text)
 
-    # Convert __SLIDE__ markers
-    if has_sections:
-        lines = text.split('\n')
-        result_lines = []
-        for line in lines:
-            if '__SLIDE__' in line:
-                # Add slide marker (but avoid duplicates)
-                if result_lines and result_lines[-1] != SLIDE_MARKER:
-                    result_lines.append(SLIDE_MARKER)
-            else:
-                result_lines.append(line)
-        text = '\n'.join(result_lines)
-    else:
-        # No ChordPro sections: use double blank lines as slide breaks
-        text = re.sub(r'\n\n\n+', f'\n{SLIDE_MARKER}\n', text)
-
-    # Final cleanup
+    # Convert blank lines (verse breaks) into [SLIDE] markers
+    # while preserving the exact line structure within verses
     lines = text.split('\n')
     cleaned = []
+    prev_blank = False
+
     for line in lines:
         stripped = line.strip()
-        if stripped == SLIDE_MARKER:
-            # Avoid consecutive slide markers
-            if cleaned and cleaned[-1] != SLIDE_MARKER:
+        if not stripped:
+            if not prev_blank and cleaned:
                 cleaned.append(SLIDE_MARKER)
-        elif stripped:
+            prev_blank = True
+        else:
             cleaned.append(stripped)
+            prev_blank = False
 
     # Remove leading/trailing slide markers
     while cleaned and cleaned[0] == SLIDE_MARKER:
