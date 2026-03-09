@@ -665,6 +665,7 @@ def backup_databases(db_path, backup_dir=None):
             # Verify backup integrity
             try:
                 conn = sqlite3.connect(dst)
+                conn.create_collation("UTF8_U_CI", utf8_u_ci_collation)
                 conn.execute("PRAGMA integrity_check")
                 conn.close()
             except sqlite3.Error as e:
