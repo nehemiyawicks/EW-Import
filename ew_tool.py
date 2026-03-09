@@ -12,8 +12,27 @@ import uuid
 import shutil
 import sqlite3
 import datetime
-import tkinter as tk
-from tkinter import filedialog, scrolledtext, messagebox, ttk
+
+# Defer tkinter import — only needed for GUI mode, not CLI
+tk = None
+filedialog = None
+scrolledtext = None
+messagebox = None
+ttk = None
+
+
+def _import_tkinter():
+    """Import tkinter lazily so CLI mode works without it."""
+    global tk, filedialog, scrolledtext, messagebox, ttk
+    if tk is not None:
+        return
+    import tkinter as _tk
+    from tkinter import filedialog as _fd, scrolledtext as _st, messagebox as _mb, ttk as _ttk
+    tk = _tk
+    filedialog = _fd
+    scrolledtext = _st
+    messagebox = _mb
+    ttk = _ttk
 
 
 # ---------------------------------------------------------------------------
@@ -1336,21 +1355,63 @@ CLI examples:
 
     if args.command is None:
         # No subcommand — launch GUI
+        _import_tkinter()
         root = tk.Tk()
         app = EWToolApp(root)
         root.mainloop()
         return
 
     if args.command == 'import':
+        print(f"Database folder: {args.db}")
+        print(f"Input path: {args.input}")
+
+        # Verify database files exist
+        for db_name in ['SongHistory.db', 'SongWords.db', 'SongKeys.db']:
+            db_file = os.path.join(args.db, db_name)
+            if os.path.exists(db_file):
+                size = os.path.getsize(db_file)
+                print(f"  Found: {db_name} ({size:,} bytes)")
+            else:
+                print(f"  MISSING: {db_name}")
+                sys.exit(1)
+
         db = EWDatabase(args.db)
         try:
             db.connect()
+
+            # Show database state before import
+            song_count = db.conn_history.execute(
+                "SELECT COUNT(*) FROM song"
+            ).fetchone()[0]
+            word_count = db.conn_words.execute(
+                "SELECT COUNT(*) FROM word"
+            ).fetchone()[0]
+            offset = db.get_resource_offset()
+            print(f"\nBefore import:")
+            print(f"  Songs in SongHistory: {song_count}")
+            print(f"  Lyrics in SongWords: {word_count}")
+            print(f"  Resource offset: {offset}")
+
             imported, skipped, errors = import_songs(
                 db, args.input,
                 skip_duplicates=not args.allow_duplicates,
                 log_callback=print
             )
+
+            # Show database state after import
+            song_count_after = db.conn_history.execute(
+                "SELECT COUNT(*) FROM song"
+            ).fetchone()[0]
+            word_count_after = db.conn_words.execute(
+                "SELECT COUNT(*) FROM word"
+            ).fetchone()[0]
+            print(f"\nAfter import:")
+            print(f"  Songs in SongHistory: {song_count_after} (+{song_count_after - song_count})")
+            print(f"  Lyrics in SongWords: {word_count_after} (+{word_count_after - word_count})")
             print(f"\nDone: {imported} imported, {skipped} skipped, {errors} errors")
+
+            if imported > 0:
+                print(f"\nIMPORTANT: Close and reopen EasyWorship to see the new songs.")
         finally:
             db.close()
 
