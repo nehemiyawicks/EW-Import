@@ -102,6 +102,12 @@ RE_CHORD_META = re.compile(
     re.MULTILINE | re.IGNORECASE
 )
 
+# "Key Change" lines (e.g. "Key Change - D7 - G", "Key Change [A] - [F#] - [B]")
+RE_KEY_CHANGE = re.compile(
+    r'^key\s*change\s*[-–—\s\[\]A-G#b0-9&]*$',
+    re.MULTILINE | re.IGNORECASE
+)
+
 
 def strip_chords(text):
     """
@@ -122,6 +128,9 @@ def strip_chords(text):
 
     # Strip chord metadata lines (Sinhala/English)
     text = RE_CHORD_META.sub('', text)
+
+    # Strip "Key Change" lines
+    text = RE_KEY_CHANGE.sub('', text)
 
     # Clean up: collapse multiple blank lines, trim whitespace per line
     lines = text.split('\n')
