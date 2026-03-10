@@ -58,41 +58,55 @@ EW7_SEARCH_PATHS = [
 
 DEFAULT_DB_PATH = ""  # Will be auto-detected on startup
 
-SONG_HISTORY_DB = "SongHistory.db"
+SONGS_DB = "Songs.db"
 SONG_WORDS_DB = "SongWords.db"
 SONG_KEYS_DB = "SongKeys.db"
+SONG_HISTORY_DB = "SongHistory.db"
 
 SLIDE_MARKER = "[SLIDE]"
 HYMN_SEPARATOR = "==="
 META_FENCE = "---"
 
-# RTF template matching EW7's format (uses \r\n line endings for Windows)
+# RTF template matching EW7's native format (from built-in songs)
+# Uses Verdana font, standard color table, \fntnamaut control word.
+# Slide boundaries are blank \par lines (NO \sdslidemarker).
 RTF_HEADER = (
-    r"{\rtf1\ansi\deff0\sdeasyworship2" "\r\n"
-    r"{\fonttbl{\f0 Tahoma;}}" "\r\n"
-    r"{\colortbl ;}" "\r\n"
+    r"{\rtf1\ansi\deff0\deftab254"
+    r"{\fonttbl{\f0\fnil\fcharset0 Arial;}{\f1\fnil\fcharset0 Verdana;}}"
+    r"{\colortbl"
+    r"\red0\green0\blue0;"
+    r"\red255\green0\blue0;"
+    r"\red0\green128\blue0;"
+    r"\red0\green0\blue255;"
+    r"\red255\green255\blue0;"
+    r"\red255\green0\blue255;"
+    r"\red128\green0\blue128;"
+    r"\red128\green0\blue0;"
+    r"\red0\green255\blue0;"
+    r"\red0\green255\blue255;"
+    r"\red0\green128\blue128;"
+    r"\red0\green0\blue128;"
+    r"\red255\green255\blue255;"
+    r"\red192\green192\blue192;"
+    r"\red128\green128\blue128;"
+    r"\red255\green255\blue255;}"
+    r"\paperw12240\paperh15840\margl1880\margr1880\margt1440\margb1440"
+    r"{\*\pnseclvl1\pnucrm\pnstart1\pnhang\pnindent720{\pntxtb}{\pntxta{.}}}" "\r\n"
+    r"{\*\pnseclvl2\pnucltr\pnstart1\pnhang\pnindent720{\pntxtb}{\pntxta{.}}}" "\r\n"
+    r"{\*\pnseclvl3\pndec\pnstart1\pnhang\pnindent720{\pntxtb}{\pntxta{.}}}" "\r\n"
+    r"{\*\pnseclvl4\pnlcltr\pnstart1\pnhang\pnindent720{\pntxtb}{\pntxta{)}}}" "\r\n"
+    r"{\*\pnseclvl5\pndec\pnstart1\pnhang\pnindent720{\pntxtb{(}}{\pntxta{)}}}" "\r\n"
+    r"{\*\pnseclvl6\pnlcltr\pnstart1\pnhang\pnindent720{\pntxtb{(}}{\pntxta{)}}}" "\r\n"
+    r"{\*\pnseclvl7\pnlcrm\pnstart1\pnhang\pnindent720{\pntxtb{(}}{\pntxta{)}}}" "\r\n"
+    r"{\*\pnseclvl8\pnlcltr\pnstart1\pnhang\pnindent720{\pntxtb{(}}{\pntxta{)}}}" "\r\n"
+    r"{\*\pnseclvl9\pndec\pnstart1\pnhang\pnindent720{\pntxtb{(}}{\pntxta{)}}}" "\r\n"
 )
 RTF_FOOTER = "}"
 
-# RTF paragraph template for a slide's first line (with sdasfactor 1)
-RTF_FIRST_PARA = (
-    r"{\pard\sdlistlevel0\qc\qdef\sdewparatemplatestyle101"
-    r"{\*\sdasfactor 1}{\*\sdasbaseline 90}\sdastextstyle101"
-    r"\plain\sdewtemplatestyle101\fs180"
-    r"{\*\sdfsreal 90}{\*\sdfsdef 90}\sdfsauto"
-)
-# RTF paragraph for subsequent lines
-RTF_PARA = (
-    r"{\pard\qc\qdef\sdewparatemplatestyle101"
-    r"\plain\sdewtemplatestyle101\fs180"
-    r"{\*\sdfsreal 90}{\*\sdfsdef 90}\sdfsauto"
-)
-# RTF slide marker paragraph (no trailing \r\n — appended by text_to_rtf)
-RTF_SLIDE_MARKER = (
-    r"{\pard\sdslidemarker\qc\qdef\sdewparatemplatestyle101"
-    r"\plain\sdewtemplatestyle101\fs180"
-    r"{\*\sdfsreal 90}{\*\sdfsdef 90}\sdfsauto\par}"
-)
+# Line format for lyrics (matches EW7 built-in songs)
+RTF_LINE_PREFIX = r"\li0\fi0\ri0\sb0\sl\sa0 \plain\f1\fntnamaut "
+# Empty line to mark slide boundary
+RTF_EMPTY_LINE = r"\li0\fi0\ri0\sb0\sl\sa0 \par" "\r\n"
 
 # Field flags for SongKeys
 FIELD_FLAG_TITLE = 1
@@ -267,7 +281,24 @@ def rtf_to_text(rtf_data):
         if line:
             text_parts.append(line)
 
-    result = '\n'.join(text_parts).strip('\n')
+    # Post-process: convert blank lines between text to [SLIDE] markers.
+    # EW7 native RTF uses empty \par lines as slide boundaries.
+    cleaned = []
+    for part in text_parts:
+        if not part.strip():
+            # Blank line — potential slide break
+            if cleaned and cleaned[-1] != SLIDE_MARKER:
+                cleaned.append(SLIDE_MARKER)
+        else:
+            cleaned.append(part)
+
+    # Remove leading/trailing slide markers
+    while cleaned and cleaned[0] == SLIDE_MARKER:
+        cleaned.pop(0)
+    while cleaned and cleaned[-1] == SLIDE_MARKER:
+        cleaned.pop()
+
+    result = '\n'.join(cleaned).strip('\n')
     return result
 
 
@@ -298,67 +329,44 @@ def text_to_rtf(text):
     """
     Convert plain text (with [SLIDE] markers) to EW7-compatible RTF.
     Returns (rtf_string, slide_count).
-    Uses \\r\\n line endings to match EW7's Windows format.
+    Matches the RTF format used by EW7's built-in songs:
+    - Verdana font with \\fntnamaut control word
+    - Slides separated by blank \\par lines (no \\sdslidemarker)
+    - \\r\\n line endings for Windows
     """
-    lines = text.split('\n')
+    # Split text into slides on [SLIDE] markers
+    slides = re.split(r'\n?\[SLIDE\]\n?', text)
+    # Remove empty slides
+    slides = [s.strip() for s in slides if s.strip()]
+
     rtf_parts = [RTF_HEADER]
-    slide_count = 0
-    is_first_line = True
-    first_line_of_slide = True
-    # Track whether second paragraph needs sdasfactor 0
-    is_second_para = False
 
-    # RTF paragraph for second line (with sdasfactor 0, matching EW7's format)
-    RTF_SECOND_PARA = (
-        r"{\pard\qc\qdef\sdewparatemplatestyle101"
-        r"{\*\sdasfactor 0}"
-        r"\plain\sdewtemplatestyle101\fs180"
-        r"{\*\sdfsreal 90}{\*\sdfsdef 90}\sdfsauto"
-    )
+    # First line uses {\pard ...} wrapper
+    first_line = True
 
-    for line in lines:
-        stripped = line.strip()
+    for slide_idx, slide in enumerate(slides):
+        if slide_idx > 0:
+            # Blank line to separate slides
+            rtf_parts.append(RTF_EMPTY_LINE)
 
-        if stripped == SLIDE_MARKER:
-            # Insert slide marker
-            rtf_parts.append(RTF_SLIDE_MARKER + "\r\n")
-            slide_count += 1
-            first_line_of_slide = True
-            continue
+        for line in slide.split('\n'):
+            stripped = line.strip()
+            if not stripped:
+                continue
+            encoded = encode_unicode_rtf(stripped)
 
-        # Skip empty lines in RTF output
-        if not stripped:
-            continue
+            if first_line:
+                rtf_parts.append(
+                    r"{\pard" + RTF_LINE_PREFIX + encoded + r"\par" + "\r\n"
+                )
+                first_line = False
+            else:
+                rtf_parts.append(
+                    RTF_LINE_PREFIX + encoded + r"\par" + "\r\n"
+                )
 
-        # Encode the line content
-        encoded = encode_unicode_rtf(stripped)
-
-        if is_first_line:
-            # Very first line of the song uses sdasfactor 1
-            rtf_parts.append(f"{RTF_FIRST_PARA}{encoded}\\par}}\r\n")
-            is_first_line = False
-            first_line_of_slide = False
-            is_second_para = True
-        elif first_line_of_slide:
-            # First line after a slide marker uses sdasfactor 1
-            para_start = (
-                r"{\pard\qc\qdef\sdewparatemplatestyle101"
-                r"{\*\sdasfactor 1}{\*\sdasbaseline 90}\sdastextstyle101"
-                r"\plain\sdewtemplatestyle101\fs180"
-                r"{\*\sdfsreal 90}{\*\sdfsdef 90}\sdfsauto"
-            )
-            rtf_parts.append(f"{para_start}{encoded}\\par}}\r\n")
-            first_line_of_slide = False
-            is_second_para = True
-        elif is_second_para:
-            # Second paragraph uses sdasfactor 0 (matching EW7's format)
-            rtf_parts.append(f"{RTF_SECOND_PARA}{encoded}\\par}}\r\n")
-            is_second_para = False
-        else:
-            rtf_parts.append(f"{RTF_PARA}{encoded}\\par}}\r\n")
-
-    rtf_parts.append(RTF_FOOTER)
-    return ''.join(rtf_parts), slide_count + 1  # +1 for last slide
+    rtf_parts.append(RTF_FOOTER + "\r\n}")
+    return ''.join(rtf_parts), len(slides)
 
 
 # ---------------------------------------------------------------------------
@@ -453,11 +461,20 @@ def write_txt_file(filepath, hymns):
 # ---------------------------------------------------------------------------
 
 class EWDatabase:
-    """Manages connections to the three EW7 song databases."""
+    """Manages connections to the EW7 song databases.
+
+    EW7 uses these databases for songs:
+    - Songs.db: song metadata (title, author, etc.)
+    - SongWords.db: lyrics in RTF format
+    - SongKeys.db: full-text search index
+
+    Song linkage: SongWords.song_id == Songs.rowid (direct, no offset).
+    SongHistory.db is only for usage tracking, NOT the song list.
+    """
 
     def __init__(self, db_path):
         self.db_path = db_path
-        self.conn_history = None
+        self.conn_songs = None
         self.conn_words = None
         self.conn_keys = None
 
@@ -471,20 +488,20 @@ class EWDatabase:
         return conn
 
     def connect(self):
-        """Open connections to all three databases."""
-        self.conn_history = self._connect(SONG_HISTORY_DB)
+        """Open connections to all song databases."""
+        self.conn_songs = self._connect(SONGS_DB)
         self.conn_words = self._connect(SONG_WORDS_DB)
         self.conn_keys = self._connect(SONG_KEYS_DB)
 
     def close(self):
         """Close all database connections."""
-        for conn in (self.conn_history, self.conn_words, self.conn_keys):
+        for conn in (self.conn_songs, self.conn_words, self.conn_keys):
             if conn:
                 try:
                     conn.close()
                 except Exception:
                     pass
-        self.conn_history = None
+        self.conn_songs = None
         self.conn_words = None
         self.conn_keys = None
 
@@ -493,17 +510,16 @@ class EWDatabase:
         Get all songs with their metadata and lyrics.
         Returns list of dicts.
         """
-        cur_h = self.conn_history.cursor()
+        cur_s = self.conn_songs.cursor()
         cur_w = self.conn_words.cursor()
 
-        # Get all songs from history
-        cur_h.execute(
+        cur_s.execute(
             "SELECT rowid, song_uid, title, author, copyright, "
             "administrator, reference_number FROM song ORDER BY rowid"
         )
         songs = []
 
-        for row in cur_h.fetchall():
+        for row in cur_s.fetchall():
             rowid, song_uid, title, author, copyright_, admin, ref_num = row
 
             song = {
@@ -514,104 +530,52 @@ class EWDatabase:
                 'copyright': copyright_ or '',
                 'administrator': admin or '',
                 'reference_number': ref_num or '',
-                'lyrics': '',
+                'lyrics_rtf': '',
                 'slide_uids': '',
+                'word_song_id': None,
             }
 
-            # Try to find matching words entry
-            # Strategy: try multiple approaches to find the lyrics
-            words_found = False
-
-            # Approach 1: Calculate offset from first entries
-            cur_w.execute("SELECT MIN(song_id) FROM word")
-            min_word_id = cur_w.fetchone()[0]
-            if min_word_id is not None:
-                offset = min_word_id - 1  # Assumes first song rowid is 1
-                expected_song_id = rowid + offset
-                cur_w.execute(
-                    "SELECT words, slide_uids FROM word WHERE song_id = ?",
-                    (expected_song_id,)
-                )
-                result = cur_w.fetchone()
-                if result:
-                    song['lyrics_rtf'] = result[0]
-                    song['slide_uids'] = result[1] or ''
-                    song['word_song_id'] = expected_song_id
-                    words_found = True
-
-            if not words_found:
-                song['lyrics_rtf'] = ''
-                song['word_song_id'] = None
+            # SongWords.song_id == Songs.rowid (direct match, no offset)
+            cur_w.execute(
+                "SELECT words, slide_uids FROM word WHERE song_id = ?",
+                (rowid,)
+            )
+            result = cur_w.fetchone()
+            if result:
+                song['lyrics_rtf'] = result[0]
+                song['slide_uids'] = result[1] or ''
+                song['word_song_id'] = rowid
 
             songs.append(song)
 
         return songs
 
-    def get_resource_offset(self):
-        """
-        Detect the resource offset between SongHistory.rowid and SongWords.song_id.
-        EasyWorship uses a global resource ID system where:
-            SongWords.song_id = SongHistory.rowid + resource_offset
-        The offset is typically 223 (resources 1-223 are used by themes, layouts, etc.).
-        """
-        cur_h = self.conn_history.cursor()
-        cur_w = self.conn_words.cursor()
-
-        # Find matching pairs to detect the offset
-        cur_h.execute("SELECT rowid FROM song ORDER BY rowid LIMIT 1")
-        first_history = cur_h.fetchone()
-        cur_w.execute("SELECT song_id FROM word ORDER BY song_id LIMIT 1")
-        first_words = cur_w.fetchone()
-
-        if first_history and first_words:
-            return first_words[0] - first_history[0]
-
-        # Default EW7 offset if no existing data
-        return 223
-
-    def get_next_song_id(self):
-        """Get the next available song_id for SongWords."""
-        cur = self.conn_words.cursor()
-        cur.execute("SELECT MAX(song_id) FROM word")
-        max_id = cur.fetchone()[0]
-        return (max_id or 0) + 1
-
-    def get_next_history_rowid(self):
-        """Get the next available rowid for SongHistory."""
-        cur = self.conn_history.cursor()
-        cur.execute("SELECT MAX(rowid) FROM song")
-        max_id = cur.fetchone()[0]
-        return (max_id or 0) + 1
-
     def song_exists(self, title):
         """Check if a song with the given title already exists."""
-        cur = self.conn_history.cursor()
+        cur = self.conn_songs.cursor()
         cur.execute(
             "SELECT rowid, song_uid FROM song WHERE title = ? COLLATE UTF8_U_CI",
             (title,)
         )
         return cur.fetchone()
 
-    def import_song(self, hymn, resource_offset=None):
+    def import_song(self, hymn):
         """
         Import a single hymn into the database.
-        Returns (song_id, song_uid) where song_id is the global resource ID
-        used in SongWords and SongKeys.
+        Returns (song_id, song_uid).
 
-        EasyWorship links SongHistory and SongWords via:
-            SongWords.song_id = SongHistory.rowid + resource_offset
+        Inserts into Songs.db (metadata) and SongWords.db (lyrics).
+        song_id in SongWords == rowid in Songs (no offset).
         """
-        if resource_offset is None:
-            resource_offset = self.get_resource_offset()
-
         title = hymn.get('title', '') or 'Untitled'
         author = hymn.get('author', '')
         copyright_ = hymn.get('copyright', '')
         ref_num = hymn.get('book_ref', '')
         lyrics = hymn.get('lyrics', '')
 
-        # Generate UIDs
-        song_uid = f"1-{str(uuid.uuid4()).upper()}"
+        # Generate UIDs matching EW7 format
+        item_uid = f"1-{str(uuid.uuid4()).upper()}"
+        rev_uid = f"1-{str(uuid.uuid4()).upper()}"
 
         # Convert lyrics to RTF
         rtf_text, slide_count = text_to_rtf(lyrics)
@@ -621,45 +585,44 @@ class EWDatabase:
             f"1-{str(uuid.uuid4()).upper()}" for _ in range(slide_count)
         )
 
-        # Insert into SongHistory first to get the rowid
-        cur_h = self.conn_history.cursor()
-        cur_h.execute(
-            "INSERT INTO song (song_uid, title, author, copyright, "
-            "administrator, reference_number) VALUES (?, ?, ?, ?, ?, ?)",
-            (song_uid, title, author, copyright_, '', ref_num)
+        # Insert into Songs.db
+        cur_s = self.conn_songs.cursor()
+        cur_s.execute(
+            "INSERT INTO song (song_item_uid, song_rev_uid, song_uid, "
+            "title, author, copyright, administrator, description, tags, "
+            "reference_number, provider_id, vendor_id, presentation_id, "
+            "layout_revision, revision) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (item_uid, rev_uid, item_uid,
+             title, author, copyright_, '', '', '',
+             ref_num, -1, 0, 0, 1, 1)
         )
-        song_rowid = cur_h.lastrowid
+        song_rowid = cur_s.lastrowid
 
-        # Derive global resource ID from rowid + offset
-        song_id = song_rowid + resource_offset
-
-        # Record creation action
-        now_ticks = int(
-            (datetime.datetime.now() - datetime.datetime(1, 1, 1)).total_seconds()
-            * 10_000_000
+        # Update revision table
+        cur_s.execute(
+            "UPDATE revision SET revision_num = revision_num + 1 "
+            "WHERE tablename = 'song'"
         )
-        cur_h.execute(
-            "INSERT INTO action (song_id, date, action_type) VALUES (?, ?, ?)",
-            (song_rowid, now_ticks, 0)
-        )
-        self.conn_history.commit()
+        self.conn_songs.commit()
 
-        # Insert into SongWords with the correct global resource ID
+        # Insert into SongWords.db (song_id == Songs.rowid, no offset)
         cur_w = self.conn_words.cursor()
         slide_layout_revs = ','.join(['1'] * slide_count)
         slide_revs = ','.join(['1'] * slide_count)
         cur_w.execute(
             "INSERT INTO word (song_id, words, slide_uids, "
             "slide_layout_revisions, slide_revisions) VALUES (?, ?, ?, ?, ?)",
-            (song_id, rtf_text, slide_uids, slide_layout_revs, slide_revs)
+            (song_rowid, rtf_text, slide_uids, slide_layout_revs, slide_revs)
         )
         self.conn_words.commit()
 
-        return song_id, song_uid
+        return song_rowid, item_uid
 
     def rebuild_search_index(self, song_id, title, lyrics_text):
         """
         Rebuild the search index in SongKeys.db for a given song.
+        link_id in SongKeys == rowid in Songs (no offset).
         """
         cur = self.conn_keys.cursor()
 
@@ -669,9 +632,7 @@ class EWDatabase:
         # Extract words from title and lyrics
         def extract_words(text):
             """Extract searchable words from text."""
-            # Remove [SLIDE] markers
             text = text.replace(SLIDE_MARKER, ' ')
-            # Split on whitespace and punctuation
             words = re.findall(r'[\w\u0D80-\u0DFF]+', text.lower(), re.UNICODE)
             return set(words)
 
@@ -682,7 +643,6 @@ class EWDatabase:
             if not word:
                 continue
 
-            # Check if word exists in word_list
             cur.execute("SELECT rowid FROM word_list WHERE word = ?", (word,))
             row = cur.fetchone()
             if row:
@@ -691,7 +651,6 @@ class EWDatabase:
                 cur.execute("INSERT INTO word_list (word) VALUES (?)", (word,))
                 word_list_id = cur.lastrowid
 
-            # Combine field flags with bitwise OR into a single value
             flag = 0
             if word in title_words:
                 flag |= FIELD_FLAG_TITLE
@@ -729,7 +688,7 @@ def backup_databases(db_path, backup_dir=None):
     backup_subdir = os.path.join(backup_dir, f'backup_{timestamp}')
     os.makedirs(backup_subdir, exist_ok=True)
 
-    db_files = [SONG_HISTORY_DB, SONG_WORDS_DB, SONG_KEYS_DB]
+    db_files = [SONGS_DB, SONG_WORDS_DB, SONG_KEYS_DB, SONG_HISTORY_DB]
     for db_file in db_files:
         src = os.path.join(db_path, db_file)
         if os.path.exists(src):
@@ -861,9 +820,6 @@ def import_songs(db, input_path, skip_duplicates=True, log_callback=None):
     imported = 0
     skipped = 0
     errors = 0
-    resource_offset = db.get_resource_offset()
-    log(f"Resource offset: {resource_offset} "
-        f"(SongWords.song_id = SongHistory.rowid + {resource_offset})")
 
     for txt_file in txt_files:
         try:
@@ -894,7 +850,7 @@ def import_songs(db, input_path, skip_duplicates=True, log_callback=None):
                     continue
 
             try:
-                song_id, song_uid = db.import_song(hymn, resource_offset)
+                song_id, song_uid = db.import_song(hymn)
 
                 # Rebuild search index
                 lyrics_text = hymn.get('lyrics', '')
@@ -950,9 +906,9 @@ def auto_detect_ew_path():
     for path in candidates:
         if os.path.isdir(path):
             # Verify it contains the required DB files
-            has_history = os.path.exists(os.path.join(path, SONG_HISTORY_DB))
+            has_songs = os.path.exists(os.path.join(path, SONGS_DB))
             has_words = os.path.exists(os.path.join(path, SONG_WORDS_DB))
-            if has_history and has_words:
+            if has_songs and has_words:
                 return path
 
     return ""
@@ -980,7 +936,7 @@ class EWToolApp:
         # --- Database path section ---
         path_frame = ttk.LabelFrame(
             main,
-            text="EW7 Database Location (folder containing SongHistory.db)",
+            text="EW7 Database Location (folder containing Songs.db)",
             padding=8
         )
         path_frame.pack(fill=tk.X, pady=(0, 10))
@@ -1069,15 +1025,15 @@ class EWToolApp:
             self.db_info.set("")
             return
 
-        history_path = os.path.join(path, SONG_HISTORY_DB)
+        songs_path = os.path.join(path, SONGS_DB)
         words_path = os.path.join(path, SONG_WORDS_DB)
 
-        if not os.path.exists(history_path):
-            self.db_info.set("SongHistory.db not found in this folder")
+        if not os.path.exists(songs_path):
+            self.db_info.set("Songs.db not found in this folder")
             return
 
         try:
-            conn = sqlite3.connect(history_path)
+            conn = sqlite3.connect(songs_path)
             conn.create_collation("UTF8_U_CI", utf8_u_ci_collation)
             cur = conn.cursor()
             cur.execute("SELECT COUNT(*) FROM song")
@@ -1093,8 +1049,7 @@ class EWToolApp:
                 conn.close()
 
             self.db_info.set(
-                f"Found: {song_count} songs in history, "
-                f"{words_count} with lyrics"
+                f"Found: {song_count} songs, {words_count} with lyrics"
             )
         except Exception as e:
             self.db_info.set(f"Error reading database: {e}")
@@ -1116,7 +1071,7 @@ class EWToolApp:
                 initial_dir = None
 
         path = filedialog.askdirectory(
-            title="Select folder containing EW7 database files (SongHistory.db, etc.)",
+            title="Select folder containing EW7 database files (Songs.db, etc.)",
             initialdir=initial_dir
         )
         if path:
@@ -1129,16 +1084,16 @@ class EWToolApp:
             messagebox.showerror("Error", "Please select the EW7 database folder.")
             return False
 
-        for db_name in [SONG_HISTORY_DB, SONG_WORDS_DB, SONG_KEYS_DB]:
+        for db_name in [SONGS_DB, SONG_WORDS_DB, SONG_KEYS_DB]:
             if not os.path.exists(os.path.join(path, db_name)):
                 messagebox.showerror(
                     "Error",
                     f"Required database file not found: {db_name}\n"
                     f"in folder: {path}\n\n"
-                    f"The folder should contain SongHistory.db, SongWords.db, "
+                    f"The folder should contain Songs.db, SongWords.db, "
                     f"and SongKeys.db.\n"
                     f"Typical path: C:\\Users\\Public\\Documents\\Softouch\\"
-                    f"EasyWorship\\Default\\Databases\\Data\\"
+                    f"EasyWorship\\Default\\v6.1\\Databases\\Data\\"
                 )
                 return False
 
@@ -1324,7 +1279,7 @@ CLI examples:
     # Import subcommand
     imp = subparsers.add_parser('import', help='Import songs from .txt files')
     imp.add_argument('--db', required=True,
-                     help='Path to EW7 database folder (containing SongHistory.db)')
+                     help='Path to EW7 database folder (containing Songs.db)')
     imp.add_argument('--input', '-i', required=True,
                      help='Path to .txt file or folder of .txt files')
     imp.add_argument('--allow-duplicates', action='store_true',
@@ -1366,7 +1321,7 @@ CLI examples:
         print(f"Input path: {args.input}")
 
         # Verify database files exist
-        for db_name in ['SongHistory.db', 'SongWords.db', 'SongKeys.db']:
+        for db_name in [SONGS_DB, SONG_WORDS_DB, SONG_KEYS_DB]:
             db_file = os.path.join(args.db, db_name)
             if os.path.exists(db_file):
                 size = os.path.getsize(db_file)
@@ -1380,17 +1335,15 @@ CLI examples:
             db.connect()
 
             # Show database state before import
-            song_count = db.conn_history.execute(
+            song_count = db.conn_songs.execute(
                 "SELECT COUNT(*) FROM song"
             ).fetchone()[0]
             word_count = db.conn_words.execute(
                 "SELECT COUNT(*) FROM word"
             ).fetchone()[0]
-            offset = db.get_resource_offset()
             print(f"\nBefore import:")
-            print(f"  Songs in SongHistory: {song_count}")
-            print(f"  Lyrics in SongWords: {word_count}")
-            print(f"  Resource offset: {offset}")
+            print(f"  Songs in Songs.db: {song_count}")
+            print(f"  Lyrics in SongWords.db: {word_count}")
 
             imported, skipped, errors = import_songs(
                 db, args.input,
@@ -1399,15 +1352,15 @@ CLI examples:
             )
 
             # Show database state after import
-            song_count_after = db.conn_history.execute(
+            song_count_after = db.conn_songs.execute(
                 "SELECT COUNT(*) FROM song"
             ).fetchone()[0]
             word_count_after = db.conn_words.execute(
                 "SELECT COUNT(*) FROM word"
             ).fetchone()[0]
             print(f"\nAfter import:")
-            print(f"  Songs in SongHistory: {song_count_after} (+{song_count_after - song_count})")
-            print(f"  Lyrics in SongWords: {word_count_after} (+{word_count_after - word_count})")
+            print(f"  Songs in Songs.db: {song_count_after} (+{song_count_after - song_count})")
+            print(f"  Lyrics in SongWords.db: {word_count_after} (+{word_count_after - word_count})")
             print(f"\nDone: {imported} imported, {skipped} skipped, {errors} errors")
 
             if imported > 0:
@@ -1434,14 +1387,12 @@ CLI examples:
         db = EWDatabase(args.db)
         try:
             db.connect()
-            offset = db.get_resource_offset()
-            print(f"Resource offset: {offset}")
 
-            # Find orphaned songs (in SongHistory but no SongWords entry)
-            cur_h = db.conn_history.cursor()
+            # Find orphaned songs (in Songs.db but no SongWords entry)
+            cur_s = db.conn_songs.cursor()
             cur_w = db.conn_words.cursor()
 
-            all_songs = cur_h.execute(
+            all_songs = cur_s.execute(
                 "SELECT rowid, title FROM song ORDER BY rowid"
             ).fetchall()
             word_ids = set(
@@ -1450,28 +1401,26 @@ CLI examples:
 
             orphans = []
             for rowid, title in all_songs:
-                expected_song_id = rowid + offset
-                if expected_song_id not in word_ids:
-                    orphans.append((rowid, title, expected_song_id))
+                if rowid not in word_ids:
+                    orphans.append((rowid, title))
 
-            print(f"\nTotal songs in SongHistory: {len(all_songs)}")
-            print(f"Total entries in SongWords: {len(word_ids)}")
+            print(f"\nTotal songs in Songs.db: {len(all_songs)}")
+            print(f"Total entries in SongWords.db: {len(word_ids)}")
             print(f"Orphaned songs (no lyrics): {len(orphans)}")
 
             if orphans:
                 print("\nOrphaned entries:")
-                for rowid, title, song_id in orphans:
-                    print(f"  rowid={rowid}, title=\"{title}\", "
-                          f"expected song_id={song_id}")
+                for rowid, title in orphans:
+                    print(f"  rowid={rowid}, title=\"{title}\"")
 
                 if args.fix:
                     print("\nRemoving orphaned entries...")
-                    for rowid, title, song_id in orphans:
-                        cur_h.execute("DELETE FROM song WHERE rowid = ?", (rowid,))
-                        cur_h.execute("DELETE FROM action WHERE song_id = ?", (rowid,))
+                    for rowid, title in orphans:
+                        cur_s.execute("DELETE FROM song WHERE rowid = ?", (rowid,))
+                        db.delete_search_index(rowid)
                         print(f"  Removed: {title} (rowid={rowid})")
-                    db.conn_history.commit()
-                    remaining = cur_h.execute("SELECT COUNT(*) FROM song").fetchone()[0]
+                    db.conn_songs.commit()
+                    remaining = cur_s.execute("SELECT COUNT(*) FROM song").fetchone()[0]
                     print(f"\nDone. {len(orphans)} orphaned entries removed. "
                           f"{remaining} songs remaining.")
                 else:
