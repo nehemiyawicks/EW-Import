@@ -339,10 +339,14 @@ def text_to_rtf(text):
     # Remove empty slides
     slides = [s.strip() for s in slides if s.strip()]
 
+    # Ensure at least one slide
+    if not slides:
+        slides = ['']
+
     rtf_parts = [RTF_HEADER]
 
-    # First line uses {\pard ...} wrapper
-    first_line = True
+    # Open the {\pard group (wraps all content, closed at the end)
+    has_content = False
 
     for slide_idx, slide in enumerate(slides):
         if slide_idx > 0:
@@ -355,18 +359,25 @@ def text_to_rtf(text):
                 continue
             encoded = encode_unicode_rtf(stripped)
 
-            if first_line:
+            if not has_content:
+                # First line opens the {\pard group
                 rtf_parts.append(
                     r"{\pard" + RTF_LINE_PREFIX + encoded + r"\par" + "\r\n"
                 )
-                first_line = False
+                has_content = True
             else:
                 rtf_parts.append(
                     RTF_LINE_PREFIX + encoded + r"\par" + "\r\n"
                 )
 
-    rtf_parts.append(RTF_FOOTER + "\r\n}")
-    return ''.join(rtf_parts), len(slides)
+    if has_content:
+        # Close {\pard group, then close {\rtf1
+        rtf_parts.append("}\r\n}")
+    else:
+        # No content — create minimal valid RTF with empty pard
+        rtf_parts.append(r"{\pard\par}" + "\r\n}")
+
+    return ''.join(rtf_parts), max(len(slides), 1)
 
 
 # ---------------------------------------------------------------------------
@@ -608,12 +619,10 @@ class EWDatabase:
 
         # Insert into SongWords.db (song_id == Songs.rowid, no offset)
         cur_w = self.conn_words.cursor()
-        slide_layout_revs = ','.join(['1'] * slide_count)
-        slide_revs = ','.join(['1'] * slide_count)
         cur_w.execute(
             "INSERT INTO word (song_id, words, slide_uids, "
             "slide_layout_revisions, slide_revisions) VALUES (?, ?, ?, ?, ?)",
-            (song_rowid, rtf_text, slide_uids, slide_layout_revs, slide_revs)
+            (song_rowid, rtf_text, slide_uids, None, None)
         )
         self.conn_words.commit()
 
@@ -1306,6 +1315,15 @@ CLI examples:
     ver.add_argument('--fix', action='store_true',
                      help='Remove orphaned entries (songs without lyrics)')
 
+    # Bible subcommand
+    bib = subparsers.add_parser('bible', help='Install or manage EW7 bible files')
+    bib.add_argument('--db', required=True,
+                     help='Path to EW7 database folder (Data folder)')
+    bib.add_argument('--install', metavar='EWB_FILE',
+                     help='Path to .ewb bible file to install')
+    bib.add_argument('--search', action='store_true',
+                     help='Search for existing bible files on disk')
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -1429,6 +1447,66 @@ CLI examples:
                 print("\nAll songs have matching lyrics entries. Database is clean.")
         finally:
             db.close()
+
+    elif args.command == 'bible':
+        if args.search:
+            print("Searching for EW7 bible files...")
+            # Search common locations
+            search_dirs = [
+                # Relative to the Data folder: go up to profile root
+                os.path.dirname(os.path.dirname(args.db)),  # Databases/
+                os.path.dirname(os.path.dirname(os.path.dirname(args.db))),  # v6.1/
+                os.path.dirname(os.path.dirname(os.path.dirname(
+                    os.path.dirname(args.db)))),  # profile root
+                # Common Windows locations
+                r"C:\Program Files (x86)\Softouch\EasyWorship",
+                r"C:\Program Files\Softouch\EasyWorship",
+                r"C:\ProgramData\Softouch\EasyWorship",
+            ]
+            found = []
+            for search_dir in search_dirs:
+                if not os.path.isdir(search_dir):
+                    continue
+                for root, dirs, files in os.walk(search_dir):
+                    for f in files:
+                        fl = f.lower()
+                        if fl.endswith('.ewb') or 'bible' in fl or 'scripture' in fl:
+                            full = os.path.join(root, f)
+                            size = os.path.getsize(full)
+                            found.append((full, size))
+                            print(f"  Found: {full} ({size:,} bytes)")
+            if not found:
+                print("  No bible files found.")
+                print("\n  Expected location for .ewb files:")
+                bibles_dir = os.path.join(
+                    os.path.dirname(os.path.dirname(os.path.dirname(args.db))),
+                    "Bibles"
+                )
+                print(f"    {bibles_dir}")
+
+        if args.install:
+            if not os.path.exists(args.install):
+                print(f"Error: File not found: {args.install}")
+                sys.exit(1)
+
+            # Determine the Bibles folder
+            # Data folder: .../v6.1/Databases/Data/
+            # Bibles folder: .../v6.1/Bibles/
+            db_folder = os.path.abspath(args.db)
+            # Go up from Data -> Databases -> v6.1
+            v61_folder = os.path.dirname(os.path.dirname(db_folder))
+            bibles_dir = os.path.join(v61_folder, "Bibles")
+
+            os.makedirs(bibles_dir, exist_ok=True)
+            dest = os.path.join(bibles_dir, os.path.basename(args.install))
+            shutil.copy2(args.install, dest)
+            print(f"Installed: {args.install}")
+            print(f"      To: {dest}")
+            print(f"\nRestart EasyWorship. The bible should appear under Scriptures tab.")
+
+        if not args.search and not args.install:
+            print("Use --search to find existing bible files,")
+            print("or --install <file.ewb> to install a bible.")
 
 
 if __name__ == '__main__':
