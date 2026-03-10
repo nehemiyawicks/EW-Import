@@ -1323,6 +1323,8 @@ CLI examples:
                      help='Path to .ewb bible file to install')
     bib.add_argument('--search', action='store_true',
                      help='Search for existing bible files on disk')
+    bib.add_argument('--verify', metavar='EWB_FILE',
+                     help='Verify an .ewb bible file format')
 
     args = parser.parse_args()
 
@@ -1489,6 +1491,19 @@ CLI examples:
                 print(f"Error: File not found: {args.install}")
                 sys.exit(1)
 
+            # Verify it's a valid SQLite .ewb file
+            with open(args.install, 'rb') as f:
+                magic = f.read(16)
+            if magic[:6] != b'SQLite':
+                if b'EasyWorship Bible Text' in magic:
+                    print("WARNING: This is an old binary-format .ewb file.")
+                    print("EW7 uses SQLite format. Rebuild with:")
+                    print(f"  python ewb_builder.py --xml <source.xml>")
+                    sys.exit(1)
+                else:
+                    print("ERROR: Not a valid .ewb file.")
+                    sys.exit(1)
+
             # Determine the Bibles folder
             # Data folder: .../v6.1/Databases/Data/
             # Bibles folder: .../v6.1/Bibles/
@@ -1503,10 +1518,46 @@ CLI examples:
             print(f"Installed: {args.install}")
             print(f"      To: {dest}")
             print(f"\nRestart EasyWorship. The bible should appear under Scriptures tab.")
+            print(f"Go to Scriptures > More Available > Install From Disk if it doesn't auto-detect.")
 
-        if not args.search and not args.install:
+        if args.verify:
+            ewb_path = args.verify
+            if not os.path.exists(ewb_path):
+                print(f"Error: File not found: {ewb_path}")
+                sys.exit(1)
+            # Check if it's SQLite format
+            with open(ewb_path, 'rb') as f:
+                magic = f.read(16)
+            if magic[:6] == b'SQLite':
+                print(f"Format: SQLite (EW7 compatible)")
+                conn = sqlite3.connect(ewb_path)
+                cur = conn.cursor()
+                try:
+                    cur.execute("SELECT id, name, abbrev_name, lang_code FROM header")
+                    row = cur.fetchone()
+                    if row:
+                        print(f"  ID: {row[0]}, Name: {row[1]}, Abbrev: {row[2]}, Lang: {row[3]}")
+                    cur.execute("SELECT COUNT(*) FROM books")
+                    print(f"  Books: {cur.fetchone()[0]}")
+                    cur.execute("SELECT COUNT(*) FROM streams")
+                    print(f"  Streams: {cur.fetchone()[0]}")
+                    cur.execute("SELECT COUNT(*) FROM words")
+                    print(f"  Words: {cur.fetchone()[0]}")
+                    print("  OK - Valid EW7 SQLite bible file")
+                except Exception as e:
+                    print(f"  ERROR: Invalid bible database: {e}")
+                finally:
+                    conn.close()
+            elif b'EasyWorship Bible Text' in magic:
+                print(f"Format: Old binary format (may not work with EW7)")
+                print(f"  Re-build with: python ewb_builder.py --xml <source.xml>")
+            else:
+                print(f"Format: Unknown (not a valid .ewb file)")
+
+        if not args.search and not args.install and not args.verify:
             print("Use --search to find existing bible files,")
-            print("or --install <file.ewb> to install a bible.")
+            print("    --install <file.ewb> to install a bible,")
+            print("    --verify <file.ewb> to check a bible file.")
 
 
 if __name__ == '__main__':
