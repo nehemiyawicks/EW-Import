@@ -56,12 +56,9 @@ While some of these are lower risk individually, they collectively reduce the ef
 - I did **not** attempt any write operations, data modification, or service disruption
 - I have **not** shared these findings with any third party
 
-## Disclosure Timeline
+## Disclosure
 
-- **Discovery date:** March 20, 2026
-- **This disclosure:** March 20, 2026
-- **Requested fix window:** 30 days (April 19, 2026)
-- **Public disclosure:** None planned — this is a private responsible disclosure
+I have no plans to publicly disclose these findings. This is a private responsible disclosure for your awareness only.
 
 I'm happy to provide additional technical details, clarify any of these findings, or assist with remediation if that would be helpful. I can be reached at the contact information below.
 
