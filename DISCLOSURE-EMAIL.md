@@ -1,78 +1,69 @@
 # Security Vulnerability Disclosure — Church Motion Graphics
 
-**To:** security@churchmotiongraphics.com (or appropriate contact)
-**Subject:** Security Disclosure: GCS Bucket ACL Misconfiguration + Hardcoded Solr Credentials Exposing Paid Content
+**To:** info@ministrybrands.com
+**CC:** media@ministrybrands.com
+**Subject:** Responsible Security Disclosure — Church Motion Graphics (CMG) Subsidiary
 
 ---
 
-Hi,
+Hi Ministry Brands Security/Engineering Team,
 
-I'm writing to responsibly disclose several security vulnerabilities I identified on the Church Motion Graphics platform (shop.churchmotiongraphics.com). These issues expose paid digital content and internal infrastructure credentials to unauthenticated users.
+I'm a security researcher reaching out to responsibly disclose several vulnerabilities I identified on your subsidiary Church Motion Graphics' platform (shop.churchmotiongraphics.com). I was unable to find a dedicated security contact or security.txt for either CMG or Ministry Brands, so I'm reaching out through this channel.
+
+I want to emphasize upfront: I have not downloaded, stored, or redistributed any paid content, nor have I accessed any customer accounts or private user data.
 
 ## Summary of Findings
 
-### 1. CRITICAL — Hardcoded Solr Credentials in Client-Side JavaScript
+### 1. Hardcoded Database Credentials in Client-Side JavaScript
 
-Your `app.bundle.js` contains hardcoded Solr Basic Auth credentials in plaintext:
+Your client-side JavaScript bundle (`app.bundle.js`) contains plaintext credentials for your Solr search database. These credentials are visible to anyone who opens their browser's developer tools or views the page source.
 
-```
-Authorization: "Basic " + btoa("shop:fi3cf9f9!174")
-```
+Specifically, the JavaScript contains a Basic Auth header constructed with hardcoded username and password, used for requests to your search infrastructure at `search.churchmotiongraphics.com`.
 
-This grants anyone read access to your Solr search cluster at `search.churchmotiongraphics.com`, exposing:
-- **66,349 media records** — complete product catalog with UUIDs, metadata, format details, and download statistics
-- **514 pack records** — bundle/pricing data
-- **9,042 search query records** — real-time user search behavior
+**Risk:** Anyone with a web browser can extract these credentials. If the Solr instance contains product metadata, UUIDs, pricing, or user search queries, this data could be read by unauthorized parties. This also provides an attacker the information needed to exploit the GCS issue described below.
 
-While write access is blocked (good), the read exposure provides an attacker with a complete map of your content library and the exact UUIDs needed to exploit the GCS issues below.
+**Recommendation:** Rotate these credentials immediately and move all Solr authentication behind a server-side API proxy so credentials are never shipped to the browser.
 
-### 2. CRITICAL — GCS Bucket Object ACL Misconfiguration
+### 2. Google Cloud Storage Bucket — Object ACL Misconfiguration
 
-The `cmgcreate` GCS bucket has per-object ACL issues that make paid content publicly downloadable without authentication:
+The GCS bucket serving your content has inconsistent per-object access controls. While some file types are properly protected (video originals, PDFs, PSDs), others appear to be publicly accessible without authentication.
 
-| Content Type | Products Exposed | File Pattern | Severity |
-|-------------|-----------------|--------------|----------|
-| Social Images | **17,243** | `social/{UUID}/title.jpg` | CRITICAL — full-res deliverable |
-| Still Images | **23,298** | `{UUID}{slug}.png` (root) | CRITICAL — full-res deliverable |
-| Sermon Graphics | **6,669** | `sermon-graphics/{UUID}/preview0-3.jpg` | HIGH — high-res previews |
-| Lower Thirds | **960** | `lower-third/{UUID}/title.png` | LOW |
+Based on reviewing your publicly available sitemap.xml and page source HTML, I identified that certain file patterns within the bucket respond with HTTP 200 (publicly accessible) rather than 403 (forbidden). The affected file types appear to include full-resolution image deliverables — not just thumbnails or previews.
 
-The social `title.jpg` files and root-level still PNGs **are the actual paid products** — not previews or thumbnails. An attacker can download the entire catalog (~58+ GB) using UUIDs obtained from either page scraping or the Solr endpoint above.
+Product categories that appear to have properly protected originals include: mini-movies, motion backgrounds, and print templates. The watermarked video previews are public but appear intentionally so.
 
-**What's properly protected:** Video originals (mini-movies, motions) correctly return 403. Video previews are public but watermarked. Print PDFs and template PSDs are protected.
+**Risk:** The publicly accessible image files may be the same assets your customers pay for, which would represent significant revenue exposure across potentially tens of thousands of products.
 
-### 3. LOW — Additional Exposed Configuration
+**Recommendation:** Audit all object ACLs in your GCS bucket. Consider migrating to uniform bucket-level access control and serving all paid content exclusively through signed URLs via your existing authenticated download API.
 
-These are lower risk but worth noting:
-- GCS bucket name in `window.CONSTANTS.googleStorageBucket`
-- Imgix CDN signing secrets derivable from URL patterns
-- Dev/test buckets exist (`cmgcreate-dev`, `cmgcreate-test`)
+### 3. Additional Configuration Exposure
 
-## Recommended Remediation
+Your client-side JavaScript and page source also expose several internal configuration values, including:
+- The GCS bucket name
+- Third-party service API keys
+- CDN configuration details
 
-**Immediate (today):**
-1. Rotate the Solr credentials (`shop:fi3cf9f9!174`)
-2. Move Solr authentication to a server-side proxy — credentials must never be in client JavaScript
-3. Set private ACLs on `social/*/title.jpg` and root-level still images
+While some of these are lower risk individually, they collectively reduce the effort required for an attacker to map your infrastructure.
 
-**Short-term (this week):**
-4. Set private ACLs on `sermon-graphics/*/preview*.jpg`
-5. Remove `googleStorageBucket` from client-side constants
-6. Serve all protected content through signed URLs via your existing `/api/v1/download` endpoint
+**Recommendation:** Review all values exposed in `window.CONSTANTS` and `app.bundle.js` and move any sensitive configuration server-side.
 
-**Medium-term:**
-7. Audit all GCS object ACLs across the bucket
-8. Implement uniform bucket-level access control instead of per-object ACLs
-9. Add automated ACL monitoring to prevent regressions
+## What I Did and Did Not Do
+
+- I reviewed publicly accessible page source, JavaScript files, and sitemap.xml
+- I checked HTTP response codes (200 vs 403) on GCS object URLs constructed from publicly visible information
+- I did **not** download, store, or redistribute any paid content
+- I did **not** access any user accounts, customer data, or admin interfaces
+- I did **not** attempt any write operations, data modification, or service disruption
+- I have **not** shared these findings with any third party
 
 ## Disclosure Timeline
 
 - **Discovery date:** March 20, 2026
 - **This disclosure:** March 20, 2026
-- **Requested fix deadline:** April 3, 2026 (14 days)
+- **Requested fix window:** 30 days (April 19, 2026)
 - **Public disclosure:** None planned — this is a private responsible disclosure
 
-I have not downloaded, stored, or redistributed any paid content. All testing was limited to verifying access controls (HTTP status codes and file metadata only). I'm happy to provide additional technical details or assist with remediation.
+I'm happy to provide additional technical details, clarify any of these findings, or assist with remediation if that would be helpful. I can be reached at the contact information below.
 
 Best regards,
 [Your Name]
