@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Protection Demo — Prevent Image Downloads</title>
+    <style>
+        /* ===== PROTECTION 1: Disable drag-and-drop saving ===== */
+        .protected-image-wrapper img {
+            -webkit-user-drag: none;
+            -khtml-user-drag: none;
+            -moz-user-drag: none;
+            -o-user-drag: none;
+            user-drag: none;
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+            pointer-events: none; /* Prevents right-click directly on image */
+        }
+
+        /* ===== PROTECTION 2: Transparent overlay to block right-click on image ===== */
+        .protected-image-wrapper {
+            position: relative;
+            display: inline-block;
+            line-height: 0;
+        }
+
+        .protected-image-wrapper::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+            background: transparent;
+        }
+
+        /* ===== PROTECTION 3: Visible watermark overlay ===== */
+        .watermark-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 5;
+            pointer-events: none;
+            background: repeating-linear-gradient(
+                -45deg,
+                transparent,
+                transparent 80px,
+                rgba(255, 255, 255, 0.03) 80px,
+                rgba(255, 255, 255, 0.03) 82px
+            );
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .watermark-overlay span {
+            color: rgba(255, 255, 255, 0.15);
+            font-size: 48px;
+            font-family: Arial, sans-serif;
+            font-weight: bold;
+            transform: rotate(-30deg);
+            text-transform: uppercase;
+            letter-spacing: 10px;
+            white-space: nowrap;
+        }
+
+        /* ===== Page Styles ===== */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a2e;
+            color: #e0e0e0;
+            min-height: 100vh;
+            padding: 40px 20px;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 10px;
+            color: #fff;
+            font-size: 24px;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #888;
+            margin-bottom: 40px;
+            font-size: 14px;
+        }
+
+        .demo-section {
+            background: #16213e;
+            border-radius: 12px;
+            padding: 30px;
+            margin-bottom: 30px;
+            border: 1px solid #0f3460;
+        }
+
+        .demo-section h2 {
+            color: #e94560;
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+
+        .demo-section h3 {
+            color: #aaa;
+            margin-bottom: 10px;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .demo-section p {
+            color: #999;
+            line-height: 1.6;
+            margin-bottom: 15px;
+            font-size: 14px;
+        }
+
+        .image-demo {
+            text-align: center;
+            margin: 20px 0;
+        }
+
+        .image-demo img {
+            max-width: 100%;
+            border-radius: 8px;
+        }
+
+        code {
+            background: #0a0a23;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 13px;
+            color: #e94560;
+        }
+
+        pre {
+            background: #0a0a23;
+            padding: 15px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 10px 0;
+            font-size: 13px;
+            line-height: 1.5;
+            color: #b0b0b0;
+        }
+
+        .protection-list {
+            list-style: none;
+            padding: 0;
+        }
+
+        .protection-list li {
+            padding: 8px 0;
+            padding-left: 25px;
+            position: relative;
+            font-size: 14px;
+            color: #ccc;
+        }
+
+        .protection-list li::before {
+            content: '🛡';
+            position: absolute;
+            left: 0;
+        }
+
+        .attack-list li::before {
+            content: '⚠';
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+
+        .badge-css { background: #1e3a5f; color: #60a5fa; }
+        .badge-js { background: #3b2f1a; color: #fbbf24; }
+        .badge-server { background: #1a3b2f; color: #34d399; }
+        .badge-html { background: #3b1a2f; color: #f472b6; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Image Download Protection — Complete Guide</h1>
+    <p class="subtitle">All client-side and server-side techniques to prevent image theft</p>
+
+    <!-- ===== DEMO: Protected Image ===== -->
+    <div class="demo-section">
+        <h2>Live Demo: Protected Image</h2>
+        <p>Try right-clicking, dragging, or using DevTools on this image:</p>
+
+        <div class="image-demo">
+            <!-- PROTECTION: Image rendered via CSS background (not in <img> tag) -->
+            <div class="protected-image-wrapper" id="protectedImage">
+                <div class="watermark-overlay"><span>PREVIEW</span></div>
+                <!-- Using CSS background-image instead of <img> src makes "Save Image As" unavailable -->
+                <canvas id="protectedCanvas" width="400" height="225" style="border-radius: 8px;"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== CRITICAL VULNERABILITY ===== -->
+    <div class="demo-section" style="border-color: #e94560; background: #2d1015;">
+        <h2 style="color: #ff4444;">CRITICAL: Full-Resolution Image Publicly Accessible via Google Cloud Storage</h2>
+        <p style="color: #ffaaaa;">The imgix signed URLs only protect the CDN layer. The <strong>original source images in Google Cloud Storage are publicly readable</strong> by anyone who knows (or guesses) the path.</p>
+
+        <h3>Proof</h3>
+        <pre style="color: #ff6b6b;">
+# Preview served by the page (14 KB, 400x225, q=40):
+https://cmgcreate-2.imgix.net/social/7106fc31-3457-4923-af95-680dd9a2720e/title.jpg
+  ?auto=format&amp;fit=crop&amp;h=225&amp;q=40&amp;w=400&amp;s=SIGNED
+
+# FULL RESOLUTION directly from GCS (5.8 MB, 2000x2500, original quality):
+https://storage.googleapis.com/cmgcreate/social/7106fc31-3457-4923-af95-680dd9a2720e/title.jpg
+
+# File size comparison:
+#   Preview: 14,265 bytes (14 KB)
+#   Original: 5,959,885 bytes (5.8 MB) — 418x larger!
+#   Original dimensions: 2000 x 2500 pixels</pre>
+
+        <h3>How an attacker finds this</h3>
+        <ol style="color: #ccc; padding-left: 20px; font-size: 14px; line-height: 2;">
+            <li>View page source → find imgix URL containing <code>cmgcreate-2.imgix.net</code></li>
+            <li>Note the bucket name is <code>cmgcreate</code> (also exposed in <code>window.CONSTANTS.googleStorageBucket</code>)</li>
+            <li>Extract the path: <code>social/7106fc31-.../title.jpg</code></li>
+            <li>Construct GCS URL: <code>https://storage.googleapis.com/cmgcreate/[path]</code></li>
+            <li>Download the full 2000x2500 original — no authentication needed</li>
+        </ol>
+
+        <h3 style="color: #ff4444;">Fix Required (Server-Side)</h3>
+        <pre style="color: #34d399;">
+# 1. Make GCS bucket private (remove allUsers/allAuthenticatedUsers read access):
+gsutil iam ch -d allUsers:objectViewer gs://cmgcreate
+gsutil iam ch -d allAuthenticatedUsers:objectViewer gs://cmgcreate
+
+# 2. Configure imgix to use a service account for GCS access
+#    (imgix will still work, but direct GCS URLs will return 403)
+
+# 3. Remove googleStorageBucket from window.CONSTANTS
+#    (currently exposed in constants.js: "googleStorageBucket":"cmgcreate")</pre>
+    </div>
+
+    <!-- ===== SECTION: All Download Methods & Protections ===== -->
+    <div class="demo-section">
+        <h2>All Ways People Can Steal Images</h2>
+        <ul class="protection-list attack-list">
+            <li><strong style="color: #ff4444;">Google Cloud Storage direct access</strong> — CRITICAL: full-res originals are public (see above)</li>
+            <li><strong>Right-click &gt; Save Image As</strong> — most common method</li>
+            <li><strong>Drag image to desktop</strong> — works on most browsers</li>
+            <li><strong>View Page Source</strong> — find <code>&lt;img src&gt;</code> or <code>og:image</code> meta tag</li>
+            <li><strong>DevTools &gt; Network tab</strong> — filter by images, copy URL</li>
+            <li><strong>DevTools &gt; Elements tab</strong> — inspect, find src attribute</li>
+            <li><strong>Derive GCS URL from imgix path</strong> — bucket name exposed in constants.js</li>
+            <li><strong>Screenshot / Screen capture</strong> — OS-level, impossible to fully prevent</li>
+            <li><strong>cURL/wget</strong> — download via command line if URL is known</li>
+            <li><strong>Browser extensions</strong> — "Download All Images" type addons</li>
+            <li><strong>Disable JavaScript</strong> — bypasses all JS-based protections</li>
+            <li><strong>Google/Bing Image Cache</strong> — search engines cache og:image</li>
+        </ul>
+    </div>
+
+    <!-- ===== SECTION: Protection Techniques ===== -->
+    <div class="demo-section">
+        <h2>Protection Techniques (All Methods)</h2>
+
+        <!-- Protection 1 -->
+        <h3><span class="badge badge-css">CSS</span> 1. Disable Right-Click Context Menu</h3>
+        <pre>// Disable right-click on the entire page or specific elements
+document.addEventListener('contextmenu', function(e) {
+    e.preventDefault();
+    return false;
+});</pre>
+
+        <!-- Protection 2 -->
+        <h3><span class="badge badge-css">CSS</span> 2. Transparent Overlay</h3>
+        <p>Place an invisible div over the image. Right-click hits the overlay, not the image.</p>
+        <pre>.protected-image-wrapper {
+    position: relative;
+}
+.protected-image-wrapper::after {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    z-index: 10;
+    background: transparent;
+}</pre>
+
+        <!-- Protection 3 -->
+        <h3><span class="badge-css badge">CSS</span> 3. Use CSS background-image Instead of &lt;img&gt;</h3>
+        <p>No <code>&lt;img&gt;</code> tag = no "Save Image As" in context menu.</p>
+        <pre>.preview-image {
+    width: 400px;
+    height: 225px;
+    background-image: url('your-image.jpg');
+    background-size: cover;
+    background-position: center;
+}</pre>
+
+        <!-- Protection 4 -->
+        <h3><span class="badge badge-css">CSS</span> 4. Disable Drag &amp; Select</h3>
+        <pre>img {
+    -webkit-user-drag: none;
+    user-drag: none;
+    -webkit-user-select: none;
+    user-select: none;
+    pointer-events: none;
+}</pre>
+
+        <!-- Protection 5 -->
+        <h3><span class="badge badge-js">JS</span> 5. Render Image on Canvas</h3>
+        <p>Draw image onto a <code>&lt;canvas&gt;</code>. The original URL is never exposed in the DOM.</p>
+        <pre>const canvas = document.getElementById('protectedCanvas');
+const ctx = canvas.getContext('2d');
+const img = new Image();
+img.crossOrigin = 'anonymous';
+img.onload = () => ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+img.src = 'your-image-url.jpg';</pre>
+
+        <!-- Protection 6 -->
+        <h3><span class="badge badge-js">JS</span> 6. Disable Keyboard Shortcuts</h3>
+        <pre>document.addEventListener('keydown', function(e) {
+    // Block Ctrl+S (Save), Ctrl+U (View Source), Ctrl+Shift+I (DevTools)
+    if ((e.ctrlKey && (e.key === 's' || e.key === 'u')) ||
+        (e.ctrlKey && e.shiftKey && e.key === 'I') ||
+        e.key === 'F12' ||
+        (e.ctrlKey && e.shiftKey && e.key === 'J')) {
+        e.preventDefault();
+        return false;
+    }
+});</pre>
+
+        <!-- Protection 7 -->
+        <h3><span class="badge badge-html">HTML</span> 7. Remove og:image Meta Tag for Previews</h3>
+        <p>The <code>og:image</code> meta tag exposes the direct image URL. Use a low-res/watermarked version instead.</p>
+        <pre>&lt;!-- BAD: Exposes full image URL --&gt;
+&lt;meta property="og:image" content="https://cdn.example.com/full-image.jpg"&gt;
+
+&lt;!-- GOOD: Use a watermarked/low-res version --&gt;
+&lt;meta property="og:image" content="https://cdn.example.com/preview-watermarked.jpg"&gt;</pre>
+
+        <!-- Protection 8 -->
+        <h3><span class="badge badge-server">SERVER</span> 8. Signed/Expiring URLs (Already in use!)</h3>
+        <p>Your imgix URLs already use signed parameters (<code>&amp;s=...</code>). Unsigned URLs return 403. This is great!</p>
+        <pre># Your current URL (signed, time-limited):
+https://cmgcreate-2.imgix.net/social/.../title.jpg?auto=format&amp;fit=crop&amp;h=225&amp;q=40&amp;w=400&amp;s=SIGNATURE
+
+# Without signature → 403 Forbidden (already working!)</pre>
+
+        <!-- Protection 9 -->
+        <h3><span class="badge badge-server">SERVER</span> 9. Serve Low-Quality Previews Only</h3>
+        <p>You're already serving <code>q=40</code> (low quality) at <code>400x225</code>. Anyone who steals this gets a tiny, blurry image. Consider going lower.</p>
+        <pre># Current: q=40, 400x225 (decent protection)
+# Better:  q=20, 300x169 (even more degraded)
+# Add visible watermark via imgix:
+?auto=format&amp;fit=crop&amp;h=225&amp;q=30&amp;w=400&amp;mark=watermark.png&amp;mark-w=200&amp;mark-align=center,middle</pre>
+
+        <!-- Protection 10 -->
+        <h3><span class="badge badge-server">SERVER</span> 10. imgix Watermarking</h3>
+        <p>Use imgix's built-in watermark parameter to burn a watermark into the served image:</p>
+        <pre># Add watermark overlay via imgix URL params:
+?mark=https://yoursite.com/watermark.png&amp;mark-w=300&amp;mark-align=center,middle&amp;mark-alpha=30</pre>
+
+        <!-- Protection 11 -->
+        <h3><span class="badge badge-server">SERVER</span> 11. Hotlink Protection (Referer Check)</h3>
+        <p>Configure your CDN/server to only serve images when the <code>Referer</code> header matches your domain.</p>
+        <pre># Nginx example:
+location ~* \.(jpg|jpeg|png|gif|webp)$ {
+    valid_referers none blocked ~\.churchmotiongraphics\.com;
+    if ($invalid_referer) {
+        return 403;
+    }
+}
+
+# Cloudflare: Use Hotlink Protection in dashboard
+# imgix: Configure source to restrict referrers</pre>
+
+        <!-- Protection 12 -->
+        <h3><span class="badge badge-server">SERVER</span> 12. Rate Limiting &amp; Bot Detection</h3>
+        <p>Detect and block automated scraping tools that bulk-download images.</p>
+
+        <!-- Protection 13 -->
+        <h3><span class="badge badge-js">JS</span> 13. Disable Print (Prevents Print-to-PDF)</h3>
+        <pre>// Hide images when printing
+@media print {
+    .protected-image-wrapper { display: none !important; }
+    body::before {
+        content: 'Image printing is disabled.';
+        display: block;
+        text-align: center;
+        padding: 50px;
+        font-size: 24px;
+    }
+}</pre>
+    </div>
+
+    <!-- ===== SECTION: Recommended Combination ===== -->
+    <div class="demo-section">
+        <h2>Recommended Protection Stack for Your Site</h2>
+        <p>No single technique is bulletproof. Use these together for maximum protection:</p>
+        <ol class="protection-list" style="list-style: decimal; padding-left: 25px;">
+            <li><strong>Keep signed imgix URLs</strong> (already done) — prevents URL manipulation</li>
+            <li><strong>Keep low quality previews</strong> (q=40, 400px) — stolen image is useless</li>
+            <li><strong>Add imgix watermark</strong> — burns "PREVIEW" into the image server-side</li>
+            <li><strong>Use CSS background-image or Canvas</strong> — removes "Save Image As" option</li>
+            <li><strong>Add transparent overlay + disable right-click</strong> — stops casual theft</li>
+            <li><strong>Disable drag</strong> — prevents drag-to-desktop</li>
+            <li><strong>Use watermarked image for og:image</strong> — protects social sharing preview</li>
+            <li><strong>Add hotlink protection</strong> — prevents embedding on other sites</li>
+        </ol>
+        <p style="margin-top: 15px; color: #e94560;"><strong>Reality check:</strong> Determined users can always screenshot. The goal is to make theft inconvenient enough that people buy instead. Low-quality + watermark + no easy download = most people will just purchase.</p>
+    </div>
+</div>
+
+<script>
+    // ===== PROTECTION: Disable right-click context menu =====
+    document.addEventListener('contextmenu', function(e) {
+        e.preventDefault();
+        return false;
+    });
+
+    // ===== PROTECTION: Disable drag =====
+    document.addEventListener('dragstart', function(e) {
+        e.preventDefault();
+        return false;
+    });
+
+    // ===== PROTECTION: Disable keyboard shortcuts for save/view-source/devtools =====
+    document.addEventListener('keydown', function(e) {
+        // Ctrl+S (Save Page)
+        if (e.ctrlKey && e.key === 's') { e.preventDefault(); return false; }
+        // Ctrl+U (View Source)
+        if (e.ctrlKey && e.key === 'u') { e.preventDefault(); return false; }
+        // Ctrl+Shift+I (DevTools)
+        if (e.ctrlKey && e.shiftKey && e.key === 'I') { e.preventDefault(); return false; }
+        // F12 (DevTools)
+        if (e.key === 'F12') { e.preventDefault(); return false; }
+        // Ctrl+Shift+J (Console)
+        if (e.ctrlKey && e.shiftKey && e.key === 'J') { e.preventDefault(); return false; }
+        // Ctrl+Shift+C (Inspect Element)
+        if (e.ctrlKey && e.shiftKey && e.key === 'C') { e.preventDefault(); return false; }
+    });
+
+    // ===== PROTECTION: Render image on Canvas (hides URL from DOM) =====
+    const canvas = document.getElementById('protectedCanvas');
+    if (canvas) {
+        const ctx = canvas.getContext('2d');
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = function() {
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            // Add canvas-level watermark
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+            ctx.font = 'bold 36px Arial';
+            ctx.textAlign = 'center';
+            ctx.save();
+            ctx.translate(canvas.width / 2, canvas.height / 2);
+            ctx.rotate(-Math.PI / 6);
+            ctx.fillText('PREVIEW ONLY', 0, 0);
+            ctx.restore();
+        };
+        // This URL would normally come from a server-side signed token
+        // For demo, using the actual preview image
+        img.src = 'https://cmgcreate-2.imgix.net/social/7106fc31-3457-4923-af95-680dd9a2720e/title.jpg?auto=format&fit=crop&h=225&q=40&transparency=grid&w=400&s=4ba9567ff57aa6c89f6be49c104fee2a';
+    }
+
+    // ===== PROTECTION: Detect DevTools open (heuristic) =====
+    (function detectDevTools() {
+        const threshold = 160;
+        const check = function() {
+            const widthThreshold = window.outerWidth - window.innerWidth > threshold;
+            const heightThreshold = window.outerHeight - window.innerHeight > threshold;
+            if (widthThreshold || heightThreshold) {
+                // DevTools likely open — hide protected images
+                document.querySelectorAll('.protected-image-wrapper').forEach(function(el) {
+                    el.style.visibility = 'hidden';
+                });
+            } else {
+                document.querySelectorAll('.protected-image-wrapper').forEach(function(el) {
+                    el.style.visibility = 'visible';
+                });
+            }
+        };
+        setInterval(check, 1000);
+    })();
+
+    // ===== PROTECTION: Clear clipboard if image is copied =====
+    document.addEventListener('copy', function(e) {
+        const selection = window.getSelection();
+        const container = document.querySelector('.protected-image-wrapper');
+        if (container && container.contains(selection.anchorNode)) {
+            e.preventDefault();
+            e.clipboardData.setData('text/plain', 'Image copying is disabled.');
+        }
+    });
+</script>
+
+</body>
+</html>
